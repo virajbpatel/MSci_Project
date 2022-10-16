@@ -7,9 +7,11 @@ from torch.utils.data import Dataset
 from torchvision.io import read_image
 from torch.autograd import Function
 from torchvision import datasets, transforms
+import torchmetrics
 import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
+import time
 
 import qiskit
 from qiskit import transpile, assemble
@@ -22,6 +24,8 @@ df['Image'] = [s + '.jpg' for s in df['Image'].values.tolist()]
 df = df[['Image', 'Class']]
 df.to_csv('data/brain_cancer/labels.csv')
 '''
+
+#%%
 class CustomImageDataset(Dataset):
 
     def __init__(self, annotations_file, img_dir, transform = None, target_transform = None) -> None:
@@ -117,8 +121,8 @@ class Net(nn.Module):
         self.conv1 = nn.Conv2d(3, 6, kernel_size = 5)
         self.conv2 = nn.Conv2d(6, 16, kernel_size = 5)
         self.dropout = nn.Dropout2d()
-        self.fc1 = nn.Linear(51984, 256) #nn.Linear(256,64)
-        self.fc2 = nn.Linear(256, 64) #nn.Linear(64,1)
+        self.fc1 = nn.Linear(51984, 64) #nn.Linear(256,64)
+        #self.fc2 = nn.Linear(256, 64) #nn.Linear(64,1)
         self.fc3 = nn.Linear(64, 1)
         self.hybrid = Hybrid(qiskit.BasicAer.get_backend('qasm_simulator'), 100, np.pi/2)
 
@@ -130,7 +134,7 @@ class Net(nn.Module):
         x = self.dropout(x)
         x = x.view(x.size(0), -1)#x.view(1, -1)
         x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        #x = F.relu(self.fc2(x))
         x = self.fc3(x)
         x = self.hybrid(x)
         return torch.cat((x, 1-x), -1)
@@ -165,6 +169,8 @@ loss_list = []
 print('Training Model')
 model.train()
 print('model.train() completed')
+
+start=time.time()
 for epoch in range(epochs):
     total_loss = []
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -177,12 +183,19 @@ for epoch in range(epochs):
     loss_list.append(sum(total_loss)/len(total_loss))
     print('Training [{:.0f}%]\tLoss: {:.4f}'.format(100.*(epoch + 1)/epochs, loss_list[-1]))
 
+print('Time Elapsed:',time.time()-start)
+
+p=[]
+t=[]
+
 model.eval()
 with torch.no_grad():
     correct = 0
     for batch_idx, (data, target) in enumerate(test_loader):
         output = model(data)
         pred = output.argmax(dim = 1, keepdim = True)
+        p.append(pred)
+        t.append(target)
         correct += pred.eq(target.view_as(pred)).sum().item()
         loss = loss_func(output, target)
         total_loss.append(loss.item())
@@ -191,3 +204,31 @@ with torch.no_grad():
         sum(total_loss)/len(total_loss),
         correct/len(test_loader)*100)
         )
+
+np.savetxt("prediction_test",p)
+np.savetxt("target_test",t)
+
+#%%
+import numpy as np
+import torch
+import torchmetrics
+
+predict=np.loadtxt("prediction_test")
+targ=np.loadtxt("target_test")
+
+prediction=[]
+target=[]
+for i in range(len(predict)):
+    prediction.append(int(predict[i]))
+    target.append(int(targ[i]))
+
+predictions=torch.tensor(prediction)
+targets=torch.tensor(target)
+
+#t=torch.tensor([1,1,0,0])
+#p=torch.tensor([0,1,0,0])
+
+confmat=torchmetrics.ConfusionMatrix(num_classes=2)
+
+confmat(predictions,targets)
+#%%
