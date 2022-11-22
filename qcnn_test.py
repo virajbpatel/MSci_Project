@@ -1,5 +1,3 @@
-from cmath import exp
-from dbm.gnu import open_flags
 from qiskit import BasicAer
 from qiskit import QuantumCircuit
 from qiskit.circuit import ParameterVector
@@ -11,16 +9,6 @@ from qiskit_machine_learning.algorithms.classifiers import NeuralNetworkClassifi
 from qiskit.algorithms.optimizers import COBYLA
 import numpy as np
 #import matplotlib.pyplot as plt
-
-'''
-from qiskit.algorithms.optimizers import COBYLA
-from qiskit.circuit import ParameterVector
-from qiskit.circuit.library import ZFeatureMap
-from qiskit.opflow import AerPauliExpectation, PauliSumOp
-from qiskit.utils import QuantumInstance, algorithm_globals
-from qiskit_machine_learning.algorithms.classifiers import NeuralNetworkClassifier
-from qiskit_machine_learning.neural_networks import TwoLayerQNN
-'''
 
 def conv_circuit(params):
     target = QuantumCircuit(2)
@@ -88,21 +76,23 @@ def pool_layer(sources, sinks, param_prefix):
     return qc
 
 quantum_instance = QuantumInstance(BasicAer.get_backend('qasm_simulator'), shots = 1024)
-feature_map = ZFeatureMap(8)
-ansatz = QuantumCircuit(8, name = 'Ansatz')
-ansatz.compose(conv_layer(8, 'c1'), list(range(8)), inplace = True)
+feature_map = ZFeatureMap(16)
+ansatz = QuantumCircuit(16, name = 'Ansatz')
+ansatz.compose(conv_layer(16, 'c0'), list(range(16)), inplace = True)
+ansatz.compose(pool_layer([0,1,2,3,4,5,6,7], [8,9,10,11,12,13,14,15], 'p0'), list(range(16)), inplace = True)
+ansatz.compose(conv_layer(8, 'c1'), list(range(8,16)), inplace = True)
 ansatz.compose(pool_layer([0,1,2,3], [4,5,6,7], 'p1'), list(range(8)), inplace = True)
-ansatz.compose(conv_layer(4,'c2'), list(range(4,8)), inplace = True)
-ansatz.compose(pool_layer([0,1],[2,3], 'p2'), list(range(4,8)), inplace = True)
-ansatz.compose(conv_layer(2, 'c3'), list(range(6,8)), inplace = True)
-ansatz.compose(pool_layer([0],[1],'p3'), list(range(6,8)), inplace = True)
-circuit = QuantumCircuit(8)
-circuit.compose(feature_map, range(8), inplace = True)
-circuit.compose(ansatz, range(8), inplace = True)
-observable = PauliSumOp.from_list(['Z'+'I'*7, 1])
+ansatz.compose(conv_layer(4,'c2'), list(range(12,16)), inplace = True)
+ansatz.compose(pool_layer([0,1],[2,3], 'p2'), list(range(12,16)), inplace = True)
+ansatz.compose(conv_layer(2, 'c3'), list(range(14,16)), inplace = True)
+ansatz.compose(pool_layer([0],[1],'p3'), list(range(14,16)), inplace = True)
+circuit = QuantumCircuit(16)
+circuit.compose(feature_map, range(16), inplace = True)
+circuit.compose(ansatz, range(16), inplace = True)
+observable = PauliSumOp.from_list([('Z'+'I'*15, 1)])
 
 qnn = TwoLayerQNN(
-    num_qubits = 8,
+    num_qubits = 16,
     feature_map = feature_map,
     ansatz = ansatz,
     observable = observable,
