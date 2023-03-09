@@ -109,28 +109,32 @@ class QuanvolutionalFilter(tq.QuantumModule):
 
     # Initialise a 4-qubit quantum circuit to encode pixels in, and then perform quanvolution with layers of 
     # random gates
-    def __init__(self, n_qubits, img_size, processor = None) -> None:
+    def __init__(self, n_qubits, img_size, pool = True, processor = None, bsz = 1) -> None:
         '''
-        Creates a quanvolutional filter with a random quantum circuit
+        Creates a quanvolutional filter with a parameterised quantum circuit
             Parameters:
                 n_qubits (int): number of qubits in the quantum circuit, also the number of pixels in the quanvolutional filter
                 img_size (int): height or width of square input image in pixels
+                pool (bool, optional): True if pooling is included in quanvolutional layer (default is True)
                 processor (qiskit.IBMQ.provider, optional): IBM-Q provider if using a real device (default is None)
         '''
         super().__init__()
+        self.pool = pool
+        self.bsz = bsz
+        self.processor = processor
         self.n_wires = n_qubits
         self.img_size = img_size
-        self.processor = processor
         self.q_device = tq.QuantumDevice(n_wires = self.n_wires)
         encoding_list = []
         for i in range(self.n_wires):
             encoding = {'input_idx': [i], 'func': 'ry', 'wires': [i]}
             encoding_list.append(encoding)
         self.encoder = tq.GeneralEncoder(encoding_list)
+        self.arch = None
         self.q_layer = tq.RandomLayer(n_ops = 8, wires = list(range(self.n_wires)))
         self.measure = tq.MeasureAll(tq.PauliZ)
-    
-    # Pass VQC over image
+        self.kernel_size = int(np.sqrt(self.n_wires))
+
     def forward(self, x, use_qiskit = False):
         '''
         Passes the quanvolutional filter over the input image
@@ -140,48 +144,44 @@ class QuanvolutionalFilter(tq.QuantumModule):
             Returns:
                 result (torch.Tensor): quanvolved image
         '''
-        bsz = 1
         size = self.img_size
-        x = x.view(bsz, size, size)
+        stride = self.kernel_size
+        if self.pool:
+            step = stride
+            stop = size-1
+        else:
+            step = 1
+            stop = size - stride + 1
+        x = x.view(self.bsz, size, size)
+
         data_list = []
-        # Filter is 2x2 pixels, transpose tensor so that it transforms as follows:
-        '''
-        [                          [
-            [r1,g1,b1],                 [r1,r2,r3,r4],
-            [r2,g2,b2],     ->          [g1,g2,g3,g4],
-            [r3,g3,b3],                 [b1,b2,b3,b4]
-            [r4,g4,b4]             ]
-        ]                          
-        '''
-        step = int(np.sqrt(self.n_wires))
-        data_list = []
-        for c in range(0, size, step):
+
+        for c in range(0, stop, step):
             row = []
-            for r in range(0, size, step):
+            for r in range(0, stop, step):
                 pixels = []
-                for i in range(step):
-                    for j in range(step):
+                for i in range(stride):
+                    for j in range(stride):
                         pixels.append(x[:,c+i,r+j])
-                data = torch.transpose(torch.cat(tuple(pixels)).view(self.n_wires,bsz), 0, 1)
+                data = torch.transpose(torch.cat(tuple(pixels)).view(self.n_wires,self.bsz), 0, 1)
                 if use_qiskit:
                     self.set_qiskit_processor(self.processor)
                     data = self.qiskit_processor.process_parameterized(
-                        self.q_device, self.encoder, self.q_layer, self.measure, data)
+                        self.q_device, self.encoder, self.q_layer, self.measure, data
+                    )
                 else:
                     self.encoder(self.q_device, data)
                     self.q_layer(self.q_device)
                     data = self.measure(self.q_device)
 
-                row.append(data.view(bsz, self.n_wires))
+                row.append(data.view(self.bsz, self.n_wires))
             data_list.append(torch.stack(row))
         data_list = torch.stack(data_list)
         data_list = torch.transpose(torch.squeeze(data_list), 0, 2).float()
-
         result = data_list
-
         return result
 
-class TrainableQuanvolutionalFilter(tq.QuantumModule):
+class TrainableQuanvolutionalFilter(QuanvolutionalFilter):
 
     '''
     A class that creates a quanvolutional filter using a parameterised quantum circuit. This is trainable.
@@ -217,77 +217,20 @@ class TrainableQuanvolutionalFilter(tq.QuantumModule):
         runs the quanvolutional algorithm over input image
     '''
 
-    def __init__(self, n_qubits, img_size, pool = True, processor = None) -> None:
+    def __init__(self, n_qubits, img_size, n_blocks = 5, pool = True, processor = None, bsz = 1) -> None:
         '''
         Creates a quanvolutional filter with a parameterised quantum circuit
             Parameters:
                 n_qubits (int): number of qubits in the quantum circuit, also the number of pixels in the quanvolutional filter
                 img_size (int): height or width of square input image in pixels
+                n_blocks (int, optional): number of rotation and entanglement blocks in quantum circuit (default is 5)
                 pool (bool, optional): True if pooling is included in quanvolutional layer (default is True)
                 processor (qiskit.IBMQ.provider, optional): IBM-Q provider if using a real device (default is None)
         '''
-        super().__init__()
-        self.pool = pool
-        self.processor = processor
-        self.n_wires = n_qubits
-        self.img_size = img_size
-        self.q_device = tq.QuantumDevice(n_wires = self.n_wires)
-        encoding_list = []
-        for i in range(self.n_wires):
-            encoding = {'input_idx': [i], 'func': 'ry', 'wires': [i]}
-            encoding_list.append(encoding)
-        self.encoder = tq.GeneralEncoder(encoding_list)
-        self.arch = {'n_wires': self.n_wires, 'n_blocks': 3, 'n_layers_per_block': 2}
+        super().__init__(n_qubits, img_size, pool, processor, bsz)
+        self.arch = {'n_wires': self.n_wires, 'n_blocks': n_blocks, 'n_layers_per_block': 2}
         self.q_layer = U3CU3Layer0(self.arch)
-        self.measure = tq.MeasureAll(tq.PauliZ)
-        self.kernel_size = int(np.sqrt(self.n_wires))
 
-    def forward(self, x, use_qiskit = False):
-        '''
-        Passes the quanvolutional filter over the input image
-            Parameters:
-                x (torch.Tensor): input image
-                use_qiskit (bool, optional): True if using a real quantum device (default is False)
-            Returns:
-                result (torch.Tensor): quanvolved image
-        '''
-        bsz = 1
-        size = self.img_size
-        stride = self.kernel_size
-        if self.pool:
-            step = stride
-            stop = size-1
-        else:
-            step = 1
-            stop = size - stride + 1
-        x = x.view(bsz, size, size)
-
-        data_list = []
-
-        for c in range(0, stop, step):
-            row = []
-            for r in range(0, stop, step):
-                pixels = []
-                for i in range(stride):
-                    for j in range(stride):
-                        pixels.append(x[:,c+i,r+j])
-                data = torch.transpose(torch.cat(tuple(pixels)).view(self.n_wires,bsz), 0, 1)
-                if use_qiskit:
-                    self.set_qiskit_processor(self.processor)
-                    data = self.qiskit_processor.process_parameterized(
-                        self.q_device, self.encoder, self.q_layer, self.measure, data
-                    )
-                else:
-                    self.encoder(self.q_device, data)
-                    self.q_layer(self.q_device)
-                    data = self.measure(self.q_device)
-
-                row.append(data.view(bsz, self.n_wires))
-            data_list.append(torch.stack(row))
-        data_list = torch.stack(data_list)
-        data_list = torch.transpose(torch.squeeze(data_list), 0, 2).float()
-        result = data_list
-        return result
 
 class QuantumClassifier(torch.nn.Module):
 
@@ -386,7 +329,7 @@ class QFC(tq.QuantumModule):
         parses feature vector into quantum fully connected layer
     '''
 
-    def __init__(self, n_qubits, encoding, processor = None) -> None:
+    def __init__(self, n_qubits, input_dim, encoding, processor = None) -> None:
         '''
         Creates quantum fully connected layer
             Parameters:
@@ -396,6 +339,7 @@ class QFC(tq.QuantumModule):
         '''
         super().__init__()
         self.n_wires = n_qubits
+        self.input_dim = input_dim
         self.processor = processor
         self.q_device = tq.QuantumDevice(n_wires = self.n_wires)
         self.encoder = tq.GeneralEncoder(encoder_op_list_name_dict[encoding])
