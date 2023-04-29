@@ -9,35 +9,53 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as col
 import quanvolutional_filter as quanv
 import QNN_Final as qnn
+import pickle
 
-IMG_SIZE = 16
+IMG_SIZE = 18
 N_QUBITS_QUANV = 4
 N_QUBITS_QNN = 4
-N_QUBITS_QFC = 4
+N_QUBITS_QFC = 10
 N_EPOCHS = 30
 N_CIRCUITS = 8
+
+class ClassicalModel(torch.nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(1, 4, 2, 2)
+        self.fc1 = torch.nn.Linear(16,2)
+
+    def forward(self, x, use_qiskit = False):
+        x = x.view(-1, IMG_SIZE, IMG_SIZE)
+        x = self.conv1(x)
+        x = F.max_pool2d(x, 2*self.k)
+        x = x.reshape(-1, 16)
+        x = self.fc1(x)
+        return F.log_softmax(x, -1) 
 
 class QuantumModel(torch.nn.Module):
 
     def __init__(self, skip) -> None:
         super().__init__()
         self.skip = skip
-        self.qf1 = quanv.TrainableQuanvolutionalFilter(N_QUBITS_QUANV, IMG_SIZE, n_blocks = 5, pool = skip)
+        self.qf1 = quanv.TrainableQuanvolutionalFilter(N_QUBITS_QUANV, IMG_SIZE, n_blocks = 3, pool = skip)
         self.k = np.sqrt(N_QUBITS_QUANV).astype(int)
         if skip:
             self.s = np.floor(IMG_SIZE/self.k).astype(int)
         else:
             self.s = np.floor((IMG_SIZE-1)/self.k).astype(int)
-        self.qfc = quanv.QFC(N_QUBITS_QFC, input_dim = 16, encoding = '4x4_ryzxy')
+        self.qfc = quanv.QFC(N_QUBITS_QFC, input_dim = 36, encoding = '6x6_ryzxy')
+        self.out = torch.nn.Linear(N_QUBITS_QFC,2)
 
     def forward(self, x, use_qiskit = False):
         x = x.view(-1, IMG_SIZE, IMG_SIZE)
         x = self.qf1(x, use_qiskit = use_qiskit)
         if not self.skip:
             x = F.avg_pool2d(x, self.k)
-        x = F.max_pool2d(x, 2*self.k)
+        x = F.max_pool2d(x, 3)
         x = x.reshape(-1, self.qfc.input_dim)
         x = self.qfc(x)
+        x = self.out(x)
         return F.log_softmax(x, -1)
 
 class HybridModel(torch.nn.Module):
@@ -151,7 +169,8 @@ def run(quanv_model, device, test_loader, train_loader, progress = False):
         accu_list1.append(accu)
         loss_list1.append(loss)
         scheduler.step()
-    torch.save(model, 'model2.pt')
+    with open('model12.pt', 'wb') as file:
+        pickle.dump(model, file)
     if progress:
         return accu_list1, loss_list1, filter_set
     return accu_list1, loss_list1
@@ -179,6 +198,8 @@ if __name__ == '__main__':
     
     #c_acc, c_loss = run(ClassicalTrial(), device, test_loader, train_loader)
     q1_acc, q1_loss, filters = run(QuantumModel(skip = True), device, test_loader, train_loader, progress = True)
+    np.savetxt('quantum_model_acc12.txt', q1_acc)
+    np.savetxt('quantum_model_loss12.txt', q1_loss)
     #q2_acc, q2_loss = run(FinalModel(skip = False), device, test_loader, train_loader)
    
     # Plot filters over time
@@ -193,7 +214,7 @@ if __name__ == '__main__':
                 axarr[c,k].yaxis.set_visible(False)
             img = fil[c,:].detach().numpy()
             axarr[c,k].imshow(img, norm=norm, cmap='gray')
-    plt.savefig('imgs2.png')
+    plt.savefig('imgs12.png')
     plt.show()
     plt.close()
     '''
@@ -204,6 +225,8 @@ if __name__ == '__main__':
     plt.show()
     plt.close()
     '''
+    import seaborn as sns
+    sns.set()
     # Accuracy plot
     #plt.plot(c_acc, label = 'Classical')
     plt.plot(q1_acc, label = 'Quanv with stride')
@@ -211,7 +234,7 @@ if __name__ == '__main__':
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend()
-    plt.savefig('acc2_plot.png')
+    plt.savefig('acc12_plot.png')
     plt.show()
     plt.close()
 
@@ -222,7 +245,7 @@ if __name__ == '__main__':
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
-    plt.savefig('loss2_plot.png')
+    plt.savefig('loss12_plot.png')
     plt.show()
     
     #print('Classical: ', c_acc[-1])

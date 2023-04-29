@@ -32,7 +32,7 @@ processor = QiskitProcessor(use_real_qc = True, backend = backend, hub = 'ibm-q'
 '''
 IMG_SIZE = 16 # Must be less than or equal to 240, and must be divisible by kernel width
 N_QUBITS = 4 # Must be a square number (square of kernel width)
-N_EPOCHS = 30 
+N_EPOCHS = 15 
 
 class HybridModel(torch.nn.Module):
 
@@ -157,10 +157,10 @@ class FinalModel(torch.nn.Module):
     def __init__(self, skip) -> None:
         super().__init__()
         self.skip = skip
-        self.qf1 = TrainableQuanvolutionalFilter(N_QUBITS, IMG_SIZE, pool = skip)
+        self.qf1 = TrainableQuanvolutionalFilter(N_QUBITS, IMG_SIZE, n_blocks = 1, pool = skip)
         self.k = np.sqrt(N_QUBITS).astype(int)
         if skip:
-            self.s = np.floor((IMG_SIZE)/self.k).astype(int)
+            self.s = np.floor((IMG_SIZE)/(self.k)).astype(int)
         else:
             self.s = np.floor((IMG_SIZE-1)/self.k).astype(int)
         self.linear1 = torch.nn.Linear(N_QUBITS*self.s*self.s, 2)
@@ -189,6 +189,22 @@ class ClassicalTrial(torch.nn.Module):
         x = F.max_pool2d(x, int(np.sqrt(N_QUBITS)))
         x = x.reshape(-1, self.out_dim)
         x = self.linear1(x)
+        return F.log_softmax(x, -1)
+
+class RandomModel(torch.nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.qf1 = TrainableQuanvolutionalFilter(N_QUBITS, IMG_SIZE, n_blocks = 2)
+        s = int(np.floor(IMG_SIZE/np.sqrt(N_QUBITS)))
+        self.out_dim = N_QUBITS*s*s
+        self.linear = torch.nn.Linear(self.out_dim, 2)
+
+    def forward(self, x, use_qiskit = False):
+        x = x.view(-1, IMG_SIZE, IMG_SIZE)
+        x = self.qf1(x)
+        x = x.reshape(-1, self.out_dim)
+        x = self.linear(x)
         return F.log_softmax(x, -1)
 
 # Training subroutine
@@ -253,15 +269,18 @@ def run(quanv_model, device, test_loader, train_loader, progress = False):
     loss_list1 = []
     filter_set = []
 
+    samples = [12, 17, 27, 49]
+
     for epoch in tqdm(range(1, n_epochs+1)):
         # Train
         print(f'Epoch {epoch}:')
         train(train_loader, model, device, optimizer)
         print(optimizer.param_groups[0]['lr'])
         if progress:
-            if epoch == 1 or epoch % 10 == 0:
-                filters = model.qf1(x_train[12][0])
-                filter_set.append(filters)
+            if epoch == 15:
+                for i in samples:
+                    filters = model.qf1(x_train[i][0])
+                    filter_set.append(filters)
         # Validation test
 
         accu, loss = valid_test(test_loader, 'test', model, device, qiskit = False)
@@ -294,23 +313,32 @@ if __name__ == '__main__':
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     
-    c_acc, c_loss = run(ClassicalTrial(), device, test_loader, train_loader)
-    q1_acc, q1_loss, filters = run(FinalModel(skip = True), device, test_loader, train_loader, progress = True)
+    #c_acc, c_loss = run(ClassicalTrial(), device, test_loader, train_loader)
+    q1_acc, q1_loss, filters = run(RandomModel(), device, test_loader, train_loader, progress = True)
     #q2_acc, q2_loss = run(FinalModel(skip = False), device, test_loader, train_loader)
+    #np.savetxt('train_quanv_acc.txt', q1_acc)
+    #np.savetxt('train_quanv_loss.txt', q1_loss)
+    import pickle
+    with open('filters.pt', 'wb') as file:
+        pickle.dump(filters, file)
    
     # Plot filters over time
-    f, axarr = plt.subplots(filters[0].size(0), len(filters))
-    epoch_list = [1,10,20,30]
+    f, axarr = plt.subplots(filters[0].size(0)+1, len(filters))
+    axarr[0,0].set_ylabel('Input')
+    epoch_list = [1,5,10,15]
+    samples = [12, 17, 27, 49]
     for k, fil in enumerate(filters):
         norm = col.Normalize(vmin=0,vmax=1)
+        og = x_train[samples[k]][0].squeeze().detach().numpy()
+        axarr[0,k].imshow(og, norm = norm, cmap = 'gray')
         for c in range(fil.size(0)):
-            axarr[c,0].set_ylabel('Channel {}'.format(c))
-            axarr[0,k].set_title('Epoch {}'.format(epoch_list[k]))
+            axarr[c+1,0].set_ylabel('Channel {}'.format(c))
+            axarr[0,k].set_title('Image {}'.format(samples[k]))
             if k != 0:
-                axarr[c,k].yaxis.set_visible(False)
+                axarr[c+1,k].yaxis.set_visible(False)
             img = fil[c,:].detach().numpy()
-            axarr[c,k].imshow(img, norm=norm, cmap='gray')
-    plt.savefig('imgs3b.png')
+            axarr[c+1,k].imshow(img, norm=norm, cmap='gray')
+    plt.savefig('sample_imgs_train.png')
     plt.show()
     plt.close()
     '''

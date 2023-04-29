@@ -334,6 +334,7 @@ class QFC(tq.QuantumModule):
         Creates quantum fully connected layer
             Parameters:
                 n_qubits (int): number of qubits in quantum circuit
+                input_dim (int): length of list to be entered in the QFC
                 encoding (str): encoding protocol from torchquantum
                 processor (qiskit.IBMQ.processor, optional): processor of real quantum device (default is None)
         '''
@@ -343,7 +344,7 @@ class QFC(tq.QuantumModule):
         self.processor = processor
         self.q_device = tq.QuantumDevice(n_wires = self.n_wires)
         self.encoder = tq.GeneralEncoder(encoder_op_list_name_dict[encoding])
-        self.arch = {'n_wires': self.n_wires, 'n_blocks': 4, 'n_layers_per_block': 2}
+        self.arch = {'n_wires': self.n_wires, 'n_blocks': 6, 'n_layers_per_block': 2}
         self.q_layer = U3CU3Layer0(self.arch)
         self.measure = tq.MeasureAll(tq.PauliZ)
 
@@ -356,7 +357,7 @@ class QFC(tq.QuantumModule):
             Returns:
                 data (torch.Tensor): predicted label from classifier
         '''
-        data = x
+        data = x*(np.pi/2)
         if use_qiskit:
             self.set_qiskit_processor(self.processor)
             data = self.qiskit_processor.process_parameterised(
