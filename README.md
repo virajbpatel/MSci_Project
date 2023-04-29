@@ -22,3 +22,14 @@ we used:
 - TorchQuantum (can be found [here](https://github.com/mit-han-lab/torchquantum))
 - Qiskit
 
+## Algorithms
+
+![Quanvolution Algorithm](quanv_wbg.png)
+
+The Quanvolution algorithm encodes a section of the image and performs a unitary operator $\hat{U}$ that requires $n$ qubits. The result of measuring each qubit produces
+ a pixel in each of the $n$ feature maps. Applying this across the entire image gives a full feature map.
+ 
+![QFC](qfc_wbg.png)
+
+The Quantum Fully Connected (QFC) layer uses $U_3$ and $CU_3$ gates as rotation and entanglement blocks, respectively. This form of the circuit uses quantum natural 
+gradient descent to classify the image. The encoding block at the beginning of the circuit efficiently encodes the feature maps from the quanvolution into quantum states.
