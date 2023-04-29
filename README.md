@@ -41,3 +41,11 @@ gradient descent to classify the image. The encoding block at the beginning of t
 
 ## Repository
 
+This repository contains many files but the following are the most important:
+- `brain_cancer_output`: this folder contains the SMIR BRATS 2015 dataset
+- `quanvolutional_filter.py`: this file contains the source code for the Quanvolution algorithm, QFC, and a quantum classifier
+- `QNN_Final.py`: this file contains the source code of the QNN
+- `QNN_Final2.py`: this file contains the source code of the QNN, but the circuit is replaces with a U3CU3 circuit from the QFC
+- `quanv_classical.py`: this file contains the experiments performed on the Quanvolution algorithm
+- `QNN_Run.py`: this file contains the experiments performed on the QNN
+- `full_model.py`: this file contains the fully quantum models that use quantum algorithms throughout. It also contains the comparison with their classical counterparts.
